@@ -1,0 +1,44 @@
+import os, uuid, shutil
+from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from models import session, Video
+from ai_engine import ai_engine
+from transaction import CreditManager
+from quality_control import QualityManager
+
+app = FastAPI()
+
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+os.makedirs("videos", exist_ok=True)
+app.mount("/videos", StaticFiles(directory="videos"), name="videos")
+
+def background_video_analysis(video_id, video_path, category):
+    video_rec = session.query(Video).filter_by(id=video_id).first()
+    res = ai_engine.run_full_analysis(video_path, category)
+    video_rec.ai_score = res["score"]
+    video_rec.is_approved = (res["status"] == "approved")
+    video_rec.needs_admin_review = res["needs_review"]
+    session.commit()
+
+@app.post("/upload-lesson")
+async def upload_lesson(bt: BackgroundTasks, user_id: int=Form(...), category: str=Form(...), video: UploadFile=File(...)):
+    file_name = f"{uuid.uuid4()}.mp4"
+    path = f"videos/{file_name}"
+    with open(path, "wb") as f: shutil.copyfileobj(video.file, f)
+
+    new_video = Video(owner_id=user_id, category=category, file_path=path)
+    session.add(new_video)
+    session.commit()
+
+    bt.add_task(background_video_analysis, new_video.id, path, category)
+    return {"message": "Yüklendi, analiz ediliyor.", "video_id": new_video.id}
+
+@app.get("/videos")
+def list_videos():
+    return session.query(Video).filter_by(is_approved=True).all()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
