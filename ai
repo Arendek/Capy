@@ -1,0 +1,52 @@
+import whisper
+import wikipediaapi
+import librosa
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+class AIEngine:
+    def __init__(self, model_size="base"):
+        self.model = whisper.load_model(model_size)
+        self.wiki = wikipediaapi.Wikipedia('EgitimPlatformu/1.0 (iletisim@mail.com)', 'tr')
+        self.vectorizer = TfidfVectorizer()
+
+    def analyze_audio_technical(self, video_path):
+        try:
+            y, sr = librosa.load(video_path, sr=16000, duration=60)
+            rms = librosa.feature.rms(y=y)[0]
+            avg_rms = np.mean(rms)
+            non_silent_intervals = librosa.effects.split(y, top_db=25)
+            total_duration = librosa.get_duration(y=y, sr=sr)
+            non_silent_duration = sum([(end - start) for start, end in non_silent_intervals]) / sr
+            silence_ratio = 1 - (non_silent_duration / total_duration)
+
+            if avg_rms < 0.005 or silence_ratio > 0.8:
+                return False, "Yetersiz ses kalitesi."
+            return True, "Teknik kontrol başarılı."
+        except:
+            return False, "Ses dosyası işlenemedi."
+
+    def run_full_analysis(self, video_path, category):
+        tech_ok, _ = self.analyze_audio_technical(video_path)
+        if not tech_ok:
+            return {"status": "rejected", "score": 0, "needs_review": False}
+
+        result = self.model.transcribe(video_path)
+        video_text = result['text'].lower()
+
+        page = self.wiki.page(category)
+        wiki_text = page.summary.lower() if page.exists() else f"{category} eğitimi"
+
+        tfidf = self.vectorizer.fit_transform([video_text, wiki_text])
+        score = round(((tfidf * tfidf.T).A)[0, 1] * 100, 2)
+
+        status = "rejected"
+        needs_review = False
+        if score >= 50: status = "approved"
+        elif 20 <= score < 50: 
+            status = "pending"
+            needs_review = True
+
+        return {"status": status, "score": score, "needs_review": needs_review}
+
+ai_engine = AIEngine()
