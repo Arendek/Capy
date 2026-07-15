@@ -1,0 +1,59 @@
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, ForeignKey, DateTime, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, sessionmaker
+from datetime import datetime
+
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, nullable=False)
+    password = Column(String, nullable=False)
+    credits = Column(Float, default=100.0)
+    last_weekly_credit = Column(DateTime, default=datetime.utcnow)
+    role = Column(String, default='student') # 'admin', 'instructor', 'student'
+    rating = Column(Float, default=5.0)
+    
+    videos = relationship("Video", back_populates="owner")
+    messages_sent = relationship("Message", foreign_keys="Message.sender_id")
+
+class Video(Base):
+    __tablename__ = 'videos'
+    id = Column(Integer, primary_key=True)
+    owner_id = Column(Integer, ForeignKey('users.id'))
+    title = Column(String)
+    category = Column(String)
+    file_path = Column(String)
+    thumbnail_path = Column(String)
+    ai_score = Column(Float, default=0.0)
+    is_approved = Column(Boolean, default=False)
+    needs_admin_review = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    likes = Column(Integer, default=0)
+    dislikes = Column(Integer, default=0)
+
+    owner = relationship("User", back_populates="videos")
+    comments = relationship("Comment", back_populates="video")
+
+class Comment(Base):
+    __tablename__ = 'comments'
+    id = Column(Integer, primary_key=True)
+    video_id = Column(Integer, ForeignKey('videos.id'))
+    user_id = Column(Integer, ForeignKey('users.id'))
+    text = Column(Text)
+    sentiment = Column(String) 
+    video = relationship("Video", back_populates="comments")
+
+class Message(Base):
+    __tablename__ = 'messages'
+    id = Column(Integer, primary_key=True)
+    sender_id = Column(Integer, ForeignKey('users.id'))
+    receiver_id = Column(Integer, ForeignKey('users.id'))
+    content = Column(Text)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+engine = create_engine('sqlite:///platform.db', connect_args={"check_same_thread": False})
+Base.metadata.create_all(engine)
+SessionLocal = sessionmaker(bind=engine)
+session = SessionLocal()
